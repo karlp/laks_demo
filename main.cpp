@@ -50,9 +50,14 @@ USB_otg usb(OTG_FS, dev_desc_p, conf_desc_p);
 
 class USB_CDC_ACM : public USB_class_driver {
 	private:
+		USB_generic& usb;
+		
 		uint32_t buf[16];
 	
 	public:
+		USB_CDC_ACM(USB_generic& usbd) : usb(usbd) {
+			usb.register_driver(this);
+		}
 	
 	protected:
 		virtual SetupStatus handle_setup(uint8_t bmRequestType, uint8_t bRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength) {
@@ -68,6 +73,14 @@ class USB_CDC_ACM : public USB_class_driver {
 			return SetupStatus::Unhandled;
 		}
 		
+		virtual void handle_set_configuration(uint8_t configuration) {
+			if(configuration) {
+				usb.register_out_handler(this, 1);
+				usb.hw_conf_ep(0x01, EPType::Bulk, 64);
+				usb.hw_conf_ep(0x81, EPType::Bulk, 64);
+			}
+		}
+		
 		virtual void handle_out(uint8_t ep, uint32_t len) {
 			if(ep == 0) {
 				usb.write(0, nullptr, 0);
@@ -81,7 +94,7 @@ class USB_CDC_ACM : public USB_class_driver {
 		}
 };
 
-USB_CDC_ACM usb_cdc_acm;
+USB_CDC_ACM usb_cdc_acm(usb);
 
 int main() {
 	#if defined(STM32F1)
@@ -120,8 +133,6 @@ int main() {
 	#endif
 	
 	usb.init();
-	usb.register_control_handler(&usb_cdc_acm);
-	usb.register_out_handler(&usb_cdc_acm, 1);
 	
 	while(1) {
 		usb.process();
