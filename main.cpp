@@ -35,6 +35,16 @@ Pin& led1 = PB1;
 
 USB_f1 usb(USB, dev_desc_p, conf_desc_p);
 
+#elif defined(STM32F3)
+// STM32F3DISCOVERY.
+
+Pin& usb_dm   = PA11;
+Pin& usb_dp   = PA12;
+
+Pin& led1 = PA15; // FIXME
+
+USB_f1 usb(USB, dev_desc_p, conf_desc_p);
+
 #elif defined(STM32F4)
 // Generic F4.
 
@@ -112,6 +122,19 @@ int main() {
 	usb_dp.set_mode(Pin::AF);
 	usb_disc.set_mode(Pin::Output);
 	usb_disc.off();
+	
+	RCC.enable(RCC.USB);
+	#elif defined(STM32F3)
+	// Initialize system timer.
+	STK.LOAD = 72000000 / 8 / 1000; // 1000 Hz.
+	STK.CTRL = 0x03;
+	
+	RCC.enable(RCC.GPIOA);
+	
+	usb_dm.set_mode(Pin::AF);
+	usb_dm.set_af(14);
+	usb_dp.set_mode(Pin::AF);
+	usb_dp.set_af(14);
 	
 	RCC.enable(RCC.USB);
 	#elif defined(STM32F4)
