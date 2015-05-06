@@ -29,8 +29,8 @@ void clock_setup(void) {
 
 int main() {
 	// Initialize system timer.
-	//STK.LOAD = 2000000 / 2 / 1000; // 1000 Hz.
-	//STK.CTRL = 0x03;
+	STK.LOAD = 32000000 / 8 / 1000 - 1; // 1000 Hz.
+	STK.CTRL = 0x07;
 	
 	RCC.enable(RCC.GPIOB);
 	led_green.set_mode(Pin::Output);
@@ -41,13 +41,13 @@ int main() {
 	led_blue.off();
 	
 	while(1) {
-		// This doesn't work on l1 yet?
-		//Time::sleep(500);
-		
+		Time::sleep(1000);
 		led_green.toggle();
+#if 0
 		for (int i = 0; i < 1000000; i++) {
 			__asm__("nop");
 		}
+#endif
 
 	}
 }
