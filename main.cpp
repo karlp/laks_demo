@@ -30,7 +30,7 @@ void clock_setup(void) {
 int main() {
 	// Initialize system timer.
 	STK.LOAD = 32000000 / 8 / 1000 - 1; // 1000 Hz.
-	STK.CTRL = 0x07;
+	STK.CTRL = 0x03; // ahb/8 + enable
 	
 	RCC.enable(RCC.GPIOB);
 	led_green.set_mode(Pin::Output);
@@ -43,11 +43,5 @@ int main() {
 	while(1) {
 		Time::sleep(1000);
 		led_green.toggle();
-#if 0
-		for (int i = 0; i < 1000000; i++) {
-			__asm__("nop");
-		}
-#endif
-
 	}
 }
