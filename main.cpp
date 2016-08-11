@@ -1,5 +1,5 @@
 #include <rcc/rcc.h>
-#include <gpio/pin.h>
+#include <gpio/gpio.h>
 #include <os/time.h>
 #include <usb/usb.h>
 #include <usb/descriptor.h>
@@ -24,35 +24,37 @@ auto conf_desc = configuration_desc(2, 1, 0, 0xc0, 0,
 desc_t dev_desc_p = {sizeof(dev_desc), (void*)&dev_desc};
 desc_t conf_desc_p = {sizeof(conf_desc), (void*)&conf_desc};
 
+typedef GPIO_t::Pin Pin;
+
 #if defined(STM32F1)
 // Maple mini.
 
-Pin& usb_disc = PB9;
-Pin& usb_dm   = PA11;
-Pin& usb_dp   = PA12;
+Pin usb_disc = GPIOB[9];
+Pin usb_dm   = GPIOA[11];
+Pin usb_dp   = GPIOA[12];
 
-Pin& led1 = PB1;
+Pin led1 = GPIOB[1];
 
 USB_f1 usb(USB, dev_desc_p, conf_desc_p);
 
 #elif defined(STM32F3)
 // STM32F3DISCOVERY.
 
-Pin& usb_dm   = PA11;
-Pin& usb_dp   = PA12;
+Pin usb_dm   = GPIOA[11];
+Pin usb_dp   = GPIOA[12];
 
-Pin& led1 = PA15; // FIXME
+Pin led1 = GPIOA[15];
 
 USB_f1 usb(USB, dev_desc_p, conf_desc_p);
 
 #elif defined(STM32F4)
 // Generic F4.
 
-Pin& usb_vbus = PA9;
-Pin& usb_dm   = PA11;
-Pin& usb_dp   = PA12;
+Pin usb_vbus = GPIOA[9];
+Pin usb_dm   = GPIOA[11];
+Pin usb_dp   = GPIOA[12];
 
-Pin& led1 = PA4;
+Pin led1 = GPIOA[4];
 
 USB_otg usb(OTG_FS, dev_desc_p, conf_desc_p);
 
@@ -107,6 +109,7 @@ class USB_CDC_ACM : public USB_class_driver {
 USB_CDC_ACM usb_cdc_acm(usb);
 
 int main() {
+	rcc_init();
 	#if defined(STM32F1)
 	// Initialize system timer.
 	STK.LOAD = 72000000 / 8 / 1000; // 1000 Hz.
