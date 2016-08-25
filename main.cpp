@@ -1,5 +1,6 @@
 #include <rcc/rcc.h>
 #include <gpio/gpio.h>
+#include <usart/usart.h>
 #include <os/time.h>
 #include <usb/usb.h>
 #include <usb/descriptor.h>
@@ -60,14 +61,19 @@ USB_otg usb(OTG_FS, dev_desc_p, conf_desc_p);
 
 #endif
 
+USART_t sport = USART2;
+Pin sport_tx = GPIOA[2];
+Pin sport_rx = GPIOA[3];
+
 class USB_CDC_ACM : public USB_class_driver {
 	private:
 		USB_generic& usb;
+		USART_t& port;
 		
 		uint32_t buf[16];
 	
 	public:
-		USB_CDC_ACM(USB_generic& usbd) : usb(usbd) {
+		USB_CDC_ACM(USB_generic& usbd, USART_t& port) : usb(usbd), port(port) {
 			usb.register_driver(this);
 		}
 	
@@ -100,13 +106,13 @@ class USB_CDC_ACM : public USB_class_driver {
 				uint32_t r_len = usb.read(ep, buf, len);
 				if(r_len) {
 					led1.toggle();
-					usb.write(1, buf, r_len);
+					port.reg.DR = buf[0];
 				}
 			}
 		}
 };
 
-USB_CDC_ACM usb_cdc_acm(usb);
+USB_CDC_ACM usb_cdc_acm(usb, sport);
 
 int main() {
 	rcc_init();
@@ -158,10 +164,22 @@ int main() {
 	
 	RCC.enable(RCC.OTGFS);
 	#endif
+
+	RCC.enable(RCC.USART2);
+	sport_rx.set_mode(Pin::AF);
+	sport_rx.set_af(7);
+	sport_tx.set_mode(Pin::AF);
+	sport_tx.set_af(7);
+	sport.set_baudrate(115200);
+	sport.reg.CR1 = (1<<13) | (0x3<<2); // enable+transmit+rx
 	
 	usb.init();
 	
 	while(1) {
 		usb.process();
+		if (sport.reg.SR & (1<<5)) {
+			uint32_t ch = sport.reg.DR;
+			usb.write(1, &ch, 1);
+		}
 	}
 }
