@@ -7,7 +7,7 @@ env = Environment(
 SConscript('laks/build_rules')
 
 #env.SelectMCU('stm32f103cb')
-env.SelectMCU('stm32f303vc')
-#env.SelectMCU('stm32f407zg')
+#env.SelectMCU('stm32f303vc')
+env.SelectMCU('stm32f407zg')
 
 env.Firmware('demo.elf', Glob('*.cpp'))
