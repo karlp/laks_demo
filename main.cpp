@@ -54,7 +54,7 @@ Pin usb_vbus = GPIOA[9];
 Pin usb_dm   = GPIOA[11];
 Pin usb_dp   = GPIOA[12];
 
-Pin led1 = GPIOA[4];
+Pin led1 = GPIOD[12];
 
 USB_otg usb(OTG_FS, dev_desc_p, conf_desc_p);
 
@@ -146,6 +146,7 @@ int main() {
 	STK.CTRL = 0x03;
 	
 	RCC.enable(RCC.GPIOA);
+	RCC.enable(RCC.GPIOD);
 	
 	led1.set_mode(Pin::Output);
 	
