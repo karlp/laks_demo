@@ -4,7 +4,7 @@
 #include <usb/usb.h>
 #include <usb/descriptor.h>
 
-auto dev_desc = device_desc(0x200, 0, 0, 0, 64, 0x1234, 0x5678, 0, 0, 0, 0, 1);
+auto dev_desc = device_desc(0x200, 0, 0, 0, 64, 0xcafe, 0x5678, 0, 0, 0, 0, 1);
 auto conf_desc = configuration_desc(2, 1, 0, 0xc0, 0,
 	// CDC ACM control
 	interface_desc(0, 0, 1, 0x02, 0x02, 0x01, 0,
