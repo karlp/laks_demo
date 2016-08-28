@@ -65,26 +65,67 @@ USART_t sport = USART2;
 Pin sport_tx = GPIOA[2];
 Pin sport_rx = GPIOA[3];
 
+//----- USB CSC PSTN120.pdf Table 17: Line Coding Structure
+struct usb_cdc_line_coding {
+	uint32_t dwDTERate;
+	uint8_t bCharFormat;
+	uint8_t bParityType;
+	uint8_t bDataBits;
+} __attribute__((packed));
+
+enum usb_cdc_line_coding_bCharFormat {
+	Stop1	= 0,
+	Stop1_5	= 1,
+	Stop2	= 2,
+};
+
+enum usb_cdc_line_coding_bParityType {
+	None	= 0,
+	Odd	= 1,
+	Even	= 2,
+	Mark	= 3,
+	Space	= 4,
+};
+//----- from usb class specs ----
+
 class USB_CDC_ACM : public USB_class_driver {
 	private:
 		USB_generic& usb;
 		USART_t& port;
 		
 		uint32_t buf[16];
+		enum Requests {
+			None,
+			SetLineCoding = 0x20,
+			GetLineCoding = 0x21,
+			SetLineControlState = 0x22,
+			SendBreak = 0x23
+		};
+
+		Requests request;
 	
 	public:
 		USB_CDC_ACM(USB_generic& usbd, USART_t& port) : usb(usbd), port(port) {
 			usb.register_driver(this);
 		}
+		void process(void) {
+			// No... let RXNE interrupt into a rxfifo, and drain it here...
+			if (sport.reg.SR & (1<<5)) {
+				uint32_t ch = sport.reg.DR;
+				usb.write(1, &ch, 1);
+			}
+		}
 	
 	protected:
 		virtual SetupStatus handle_setup(uint8_t bmRequestType, uint8_t bRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength) {
-			if(bmRequestType == 0x21 && bRequest == 0x20) {
+			request = Requests::None;
+			if(bmRequestType == 0x21 && bRequest == Requests::SetLineCoding) {
+				request = Requests::SetLineCoding;
+				// Better save wIndex here if you ever want to have multiple serial ports!
 				return SetupStatus::Ok;
 			}
-			
-			if(bmRequestType == 0x21 && bRequest == 0x22) {
-				usb.write(0, nullptr, 0);
+			if(bmRequestType == 0x21 && bRequest == Requests::SetLineControlState) {
+				request = Requests::SetLineControlState;
 				return SetupStatus::Ok;
 			}
 			
@@ -98,12 +139,41 @@ class USB_CDC_ACM : public USB_class_driver {
 				usb.hw_conf_ep(0x81, EPType::Bulk, 64);
 			}
 		}
+
+		virtual void handle_out_control(uint32_t len) {
+			bool res = false;
+			switch (request) {
+			case Requests::SetLineCoding: {
+				struct usb_cdc_line_coding coding;
+				if (usb.read(0, (uint32_t*)&coding, len) != sizeof(coding)) {
+					usb_rblog.log("failed to read coding?");
+				} else {
+					// FIXME - handle parity, stop bits and word length
+					sport.set_baudrate(coding.dwDTERate);
+					res = true;
+				}
+				break;
+			case Requests::SetLineControlState:
+				// FIXME - set DTR/RTS here based on wValue that you saved...
+				res = true;
+				break;
+			}
+			default:
+				break;
+			}
+			if (res) {
+				usb.write(0, nullptr, 0);
+			} else {
+				usb.hw_set_stall(0);
+			}
+		}
 		
 		virtual void handle_out(uint8_t ep, uint32_t len) {
 			if(ep == 0) {
-				usb.write(0, nullptr, 0);
+				handle_out_control(len);
 			} else if(ep == 1) {
 				uint32_t r_len = usb.read(ep, buf, len);
+				// FIXME - yeah, no, need to put into our txbuffer here...
 				if(r_len) {
 					led1.toggle();
 					port.reg.DR = buf[0];
@@ -177,9 +247,6 @@ int main() {
 	
 	while(1) {
 		usb.process();
-		if (sport.reg.SR & (1<<5)) {
-			uint32_t ch = sport.reg.DR;
-			usb.write(1, &ch, 1);
-		}
+		usb_cdc_acm.process();
 	}
 }
