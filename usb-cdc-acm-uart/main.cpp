@@ -61,9 +61,99 @@ USB_otg usb(OTG_FS, dev_desc_p, conf_desc_p);
 
 #endif
 
-USART_t sport = USART2;
+USART_t sport_uart = USART2;
 Pin sport_tx = GPIOA[2];
 Pin sport_rx = GPIOA[3];
+
+template < int ABuffer_Len >
+class ABuffer {
+private:
+	uint8_t buf[ABuffer_Len];
+	volatile int idx_r;
+	volatile int idx_w;
+public:
+	ABuffer() : idx_r(0), idx_w(0) {}
+	inline bool empty() {
+		return (idx_r == idx_w);
+	}
+
+	int depth() {
+		return ((unsigned int)(ABuffer_Len + idx_w - idx_r) % ABuffer_Len);
+	}
+
+	int get() {
+		if (empty()) {
+			return -1;
+		}
+		uint8_t c = buf[idx_r];
+		idx_r = (idx_r + 1) % ABuffer_Len;
+		return c;
+	}
+
+	bool put(uint8_t c) {
+		int next = (idx_w + 1) % ABuffer_Len;
+		if (next != idx_r) {
+			buf[idx_w] = c;
+			idx_w = next;
+			return true;
+		}
+		return false;
+	}
+};
+
+class USART_Buffered {
+	friend class USB_CDC_ACM;
+
+	private:
+		USART_t &port;
+		// just needs to be deep enough to max baud in the loop time to make a new usb frame. (1ms)
+		ABuffer<64> rx_ring;
+		// needs to allow two full out USB packets.  (We _could_ set MPS to small, but... 64 it is)
+		ABuffer<128> tx_ring;
+	public:
+		USART_Buffered(USART_t &sport) : port(sport) {}
+		void init() {
+			port.set_baudrate(115200);
+			// enable, rxnei, te, re
+			port.reg.CR1 = (1<<13) | (1<<5) | (0x3<<2);
+			Interrupt::enable(Interrupt::USART2);
+		}
+		void irq() {
+			if (port.reg.SR & 1<<5) { // RXNE
+				if (rx_ring.put(port.reg.DR & 0xff)) {  // FIXME no parity yet
+					// good
+				} else {
+					usb_rblog.log("fatal -> rx ring full!");
+					while(1);
+				}
+			}
+			if (port.reg.SR & (1<<7)) { // TXE
+				if (tx_ring.empty()) {
+					port.reg.CR1 &= ~(1<<7); // Disable txe
+				} else {
+					port.reg.DR = tx_ring.get();
+				}
+			}
+			// TODO - TXC for rs485 control...
+		}
+
+		void set_baudrate(uint32_t baud) {
+			port.set_baudrate(baud);
+		}
+
+		void push_tx(uint8_t *buf, int len) {
+			for (int i = 0; i < len; i++) {
+				if (!tx_ring.put(buf[i])) {
+					// this causes the rblog to be truncated to just this entry?
+					//usb_rblog.log("fatal -> tx ring full. flow control earlier!");
+					while(1);
+				}
+				// turn on TXE, definitely got data to send!
+				port.reg.CR1 |= (1<<7);
+			}
+		}
+};
+
 
 //----- USB CSC PSTN120.pdf Table 17: Line Coding Structure
 struct usb_cdc_line_coding {
@@ -91,7 +181,7 @@ enum usb_cdc_line_coding_bParityType {
 class USB_CDC_ACM : public USB_class_driver {
 	private:
 		USB_generic& usb;
-		USART_t& port;
+		USART_Buffered& port;
 		
 		uint32_t buf[16];
 		enum Requests {
@@ -105,14 +195,28 @@ class USB_CDC_ACM : public USB_class_driver {
 		Requests request;
 	
 	public:
-		USB_CDC_ACM(USB_generic& usbd, USART_t& port) : usb(usbd), port(port) {
+		USB_CDC_ACM(USB_generic& usbd, USART_Buffered& port) : usb(usbd), port(port) {
 			usb.register_driver(this);
 		}
 		void process(void) {
-			// No... let RXNE interrupt into a rxfifo, and drain it here...
-			if (sport.reg.SR & (1<<5)) {
-				uint32_t ch = sport.reg.DR;
-				usb.write(1, &ch, 1);
+			// Re-enable OUT from host if we've got space for more data
+			if (port.tx_ring.depth() < 64) {
+				//usb_rblog.log("Cnakking, depth=%d", ringb_depth(&tx_ring));
+				//usb_rblog.log("CNAKKING");
+				usb.hw_set_nak(1, false);
+			}
+
+			// Drain RX ring
+			uint8_t zero_copy_is_for_losers[64];
+			int zci = 0;
+			int c = port.rx_ring.get();
+			while (c >= 0) {
+				zero_copy_is_for_losers[zci++] = c;
+				c = port.rx_ring.get();
+			}
+
+			if (zci) {
+				usb.write(1, (uint32_t*)zero_copy_is_for_losers, zci);
 			}
 		}
 	
@@ -125,10 +229,14 @@ class USB_CDC_ACM : public USB_class_driver {
 				return SetupStatus::Ok;
 			}
 			if(bmRequestType == 0x21 && bRequest == Requests::SetLineControlState) {
+				// No data stage for this, must handle here!
 				request = Requests::SetLineControlState;
+				// FIXME - set dtr/rts here
+				usb_rblog.log("correctly setup ok SLCS");
+				usb.write(0, nullptr, 0);
 				return SetupStatus::Ok;
 			}
-			
+			usb_rblog.log("setupfail: req: %x", bRequest);
 			return SetupStatus::Unhandled;
 		}
 		
@@ -149,13 +257,10 @@ class USB_CDC_ACM : public USB_class_driver {
 					usb_rblog.log("failed to read coding?");
 				} else {
 					// FIXME - handle parity, stop bits and word length
-					sport.set_baudrate(coding.dwDTERate);
+					port.set_baudrate(coding.dwDTERate);
+					usb_rblog.log("port set to %d", coding.dwDTERate);
 					res = true;
 				}
-				break;
-			case Requests::SetLineControlState:
-				// FIXME - set DTR/RTS here based on wValue that you saved...
-				res = true;
 				break;
 			}
 			default:
@@ -176,13 +281,29 @@ class USB_CDC_ACM : public USB_class_driver {
 				// FIXME - yeah, no, need to put into our txbuffer here...
 				if(r_len) {
 					led1.toggle();
-					port.reg.DR = buf[0];
+					// At this point, need to nak if the port outbuffer is full?
+					// Or, actually, should have already been naked if one more transfer would fill it.
+					// Can't allow getting here, we can't drop bytes, we must push back to the host.
+					// but somewhere here need to get what length is available
+					port.push_tx((uint8_t*)buf, r_len);
+					if (port.tx_ring.depth() >= 64) {  // fuck it, never use the whoel buffer, less branes now
+						//usb_rblog.log("nakking, depth=%d", ringb_depth(&tx_ring));
+						//usb_rblog.log("nakking");
+						usb.hw_set_nak(ep, true);
+					}
+					usb_rblog.log("depth now %d", ((uint32_t)port.tx_ring.depth()));
 				}
 			}
 		}
 };
 
+USART_Buffered sport(USART2);
 USB_CDC_ACM usb_cdc_acm(usb, sport);
+
+template <>
+void interrupt<Interrupt::USART2>() {
+	sport.irq();
+}
 
 int main() {
 	rcc_init();
@@ -240,9 +361,8 @@ int main() {
 	sport_rx.set_af(7);
 	sport_tx.set_mode(Pin::AF);
 	sport_tx.set_af(7);
-	sport.set_baudrate(115200);
-	sport.reg.CR1 = (1<<13) | (0x3<<2); // enable+transmit+rx
-	
+
+	sport.init();
 	usb.init();
 	
 	while(1) {
