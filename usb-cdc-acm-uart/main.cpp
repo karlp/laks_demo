@@ -28,13 +28,12 @@ desc_t conf_desc_p = {sizeof(conf_desc), (void*)&conf_desc};
 typedef GPIO_t::Pin Pin;
 
 #if defined(STM32F1)
-// Maple mini.
+// cheap f103c8 china board
 
-Pin usb_disc = GPIOB[9];
 Pin usb_dm   = GPIOA[11];
 Pin usb_dp   = GPIOA[12];
 
-Pin led1 = GPIOB[1];
+Pin led1 = GPIOC[13];
 
 USB_f1 usb(USB, dev_desc_p, conf_desc_p);
 
@@ -315,13 +314,20 @@ int main() {
 	RCC.enable(RCC.AFIO);
 	RCC.enable(RCC.GPIOA);
 	RCC.enable(RCC.GPIOB);
+	RCC.enable(RCC.GPIOC);
 	
 	led1.set_mode(Pin::Output);
+	// hack to reenumerate
+	usb_dp.set_mode(Pin::Output);
+	usb_dp.off();
+	Time::sleep(1);
 	
 	usb_dm.set_mode(Pin::AF);
 	usb_dp.set_mode(Pin::AF);
-	usb_disc.set_mode(Pin::Output);
-	usb_disc.off();
+//	usb_disc.set_mode(Pin::Output);
+//	usb_disc.off();
+	sport_rx.set_mode(Pin::InputPull);
+	sport_tx.set_mode(Pin::AF);
 	
 	RCC.enable(RCC.USB);
 	#elif defined(STM32F3)
@@ -354,13 +360,14 @@ int main() {
 	usb_dp.set_af(10);
 	
 	RCC.enable(RCC.OTGFS);
-	#endif
-
-	RCC.enable(RCC.USART2);
 	sport_rx.set_mode(Pin::AF);
 	sport_rx.set_af(7);
 	sport_tx.set_mode(Pin::AF);
 	sport_tx.set_af(7);
+
+	#endif
+
+	RCC.enable(RCC.USART2);
 
 	sport.init();
 	usb.init();
