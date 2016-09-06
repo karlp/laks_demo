@@ -192,6 +192,7 @@ class USB_CDC_ACM : public USB_class_driver {
 		};
 
 		Requests request;
+		bool nakked = false;
 	
 	public:
 		USB_CDC_ACM(USB_generic& usbd, USART_Buffered& port) : usb(usbd), port(port) {
@@ -199,10 +200,11 @@ class USB_CDC_ACM : public USB_class_driver {
 		}
 		void process(void) {
 			// Re-enable OUT from host if we've got space for more data
-			if (port.tx_ring.depth() < 64) {
+			if (port.tx_ring.depth() < 64 && nakked) {
 				//usb_rblog.log("Cnakking, depth=%d", ringb_depth(&tx_ring));
 				//usb_rblog.log("CNAKKING");
 				usb.hw_set_nak(1, false);
+				nakked = false;
 			}
 
 			// Drain RX ring
@@ -272,7 +274,7 @@ class USB_CDC_ACM : public USB_class_driver {
 			}
 		}
 		
-		virtual void handle_out(uint8_t ep, uint32_t len) {
+		virtual OutStatus handle_out(uint8_t ep, uint32_t len) {
 			if(ep == 0) {
 				handle_out_control(len);
 			} else if(ep == 1) {
@@ -285,14 +287,17 @@ class USB_CDC_ACM : public USB_class_driver {
 					// Can't allow getting here, we can't drop bytes, we must push back to the host.
 					// but somewhere here need to get what length is available
 					port.push_tx((uint8_t*)buf, r_len);
+					usb_rblog.log("depth now %d", ((uint32_t)port.tx_ring.depth()));
 					if (port.tx_ring.depth() >= 64) {  // fuck it, never use the whoel buffer, less branes now
 						//usb_rblog.log("nakking, depth=%d", ringb_depth(&tx_ring));
 						//usb_rblog.log("nakking");
-						usb.hw_set_nak(ep, true);
+						//usb.hw_set_nak(ep, true);
+						nakked = true;
+						return OutStatus::NAK;
 					}
-					usb_rblog.log("depth now %d", ((uint32_t)port.tx_ring.depth()));
 				}
 			}
+			return OutStatus::Ok;
 		}
 };
 
