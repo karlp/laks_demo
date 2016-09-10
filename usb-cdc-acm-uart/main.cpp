@@ -201,8 +201,6 @@ class USB_CDC_ACM : public USB_class_driver {
 		void process(void) {
 			// Re-enable OUT from host if we've got space for more data
 			if (port.tx_ring.depth() < 64 && nakked) {
-				//usb_rblog.log("Cnakking, depth=%d", ringb_depth(&tx_ring));
-				//usb_rblog.log("CNAKKING");
 				usb.hw_set_nak(1, false);
 				nakked = false;
 			}
@@ -279,19 +277,11 @@ class USB_CDC_ACM : public USB_class_driver {
 				handle_out_control(len);
 			} else if(ep == 1) {
 				uint32_t r_len = usb.read(ep, buf, len);
-				// FIXME - yeah, no, need to put into our txbuffer here...
 				if(r_len) {
 					led1.toggle();
-					// At this point, need to nak if the port outbuffer is full?
-					// Or, actually, should have already been naked if one more transfer would fill it.
-					// Can't allow getting here, we can't drop bytes, we must push back to the host.
-					// but somewhere here need to get what length is available
 					port.push_tx((uint8_t*)buf, r_len);
 					usb_rblog.log("depth now %d", ((uint32_t)port.tx_ring.depth()));
-					if (port.tx_ring.depth() >= 64) {  // fuck it, never use the whoel buffer, less branes now
-						//usb_rblog.log("nakking, depth=%d", ringb_depth(&tx_ring));
-						//usb_rblog.log("nakking");
-						//usb.hw_set_nak(ep, true);
+					if (port.tx_ring.depth() >= 64) {
 						nakked = true;
 						return OutStatus::NAK;
 					}
